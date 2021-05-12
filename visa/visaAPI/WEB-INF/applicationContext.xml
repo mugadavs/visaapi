@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xmlns:mvc="http://www.springframework.org/schema/mvc"
+       xmlns:context="http://www.springframework.org/schema/context"
+       xmlns:mybatis="http://mybatis.org/schema/mybatis-spring"
+       xsi:schemaLocation="http://www.springframework.org/schema/beans
+        https://www.springframework.org/schema/beans/spring-beans.xsd
+        http://www.springframework.org/schema/context
+        https://www.springframework.org/schema/context/spring-context.xsd
+        http://www.springframework.org/schema/mvc
+        https://www.springframework.org/schema/mvc/spring-mvc.xsd
+        http://mybatis.org/schema/mybatis-spring
+        http://mybatis.org/schema/mybatis-spring.xsd">
+
+    <context:component-scan base-package="com.hdfs.visa"/>
+    <mvc:annotation-driven/>
+
+
+    <mvc:view-resolvers>
+        <mvc:content-negotiation>
+            <mvc:default-views>
+                <bean class="org.springframework.web.servlet.view.json.MappingJackson2JsonView"/>
+            </mvc:default-views>
+        </mvc:content-negotiation>
+        <mvc:jsp/>
+    </mvc:view-resolvers>
+
+    <bean id="wasDataSource" class="org.springframework.jndi.JndiObjectFactoryBean">
+        <property name="jndiName" value="java:comp/env/jdbc/recworks"/>
+        <property name="lookupOnStartup" value="true"/>
+        <property name="cache" value="true"/>
+        <property name="proxyInterface" value="javax.sql.DataSource"/>
+    </bean>
+
+    <bean id="sqlSessionFactory" class="org.mybatis.spring.SqlSessionFactoryBean">
+        <property name="dataSource" ref="wasDataSource" />
+        <property name="mapperLocations" value="classpath:com/hdfs/visa/api/mapper/*.xml" />
+    </bean>
+
+    <bean id="sqlSession" class="org.mybatis.spring.SqlSessionTemplate">
+        <constructor-arg index="0" ref="sqlSessionFactory" />
+    </bean>
+
+    <bean id="validator" class="org.springframework.validation.beanvalidation.LocalValidatorFactoryBean"/>
+    <bean class="org.springframework.validation.beanvalidation.MethodValidationPostProcessor"/>
+
+</beans>

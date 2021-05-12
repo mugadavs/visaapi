@@ -1,0 +1,27 @@
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.hdfs.visa.api.mapper.UserMapper">
+
+    <select id="getUserByUserName" resultType="com.hdfs.visa.api.model.User">
+        <![CDATA[
+            SELECT
+                user_id id,
+                channel_code channelCode,
+                username userName,
+                created_by createBy,
+                first_name firstName,
+                last_name lastName,
+                created_date createDate,
+                revised_by updateBy,
+                revised_date updateTime,
+                lang_code languageCode,
+                expiry_date expirationDate,
+                status_code statusCode,
+                email emailAddress
+            FROM
+                access_users
+            WHERE UPPER(username) = UPPER(#{userName})
+		]]>
+    </select>
+
+</mapper>

@@ -1,0 +1,565 @@
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!--suppress ALL -->
+<mapper namespace="com.hdfs.visa.api.mapper.AgreementMapper">
+
+    <select id="getAgreementsByCellPhone" resultType="com.hdfs.visa.api.model.Agreement" parameterType="java.util.HashMap">
+        <![CDATA[
+            SELECT
+            a.agreement_id agreementId,
+            a.status_date updateDate
+            from agreements a, customers_address_types cat, customers_address ca
+            where ca.cell_phone = #{cellPhoneNum}
+            and cat.customer_id = a.customer_id
+            and cat.address_code = 'RE'
+            and cat.address_id = ca.address_id
+            and a.status_date > sysdate - #{maxDays}
+            order by a.status_date desc
+            FETCH FIRST 50 ROWS ONLY
+        ]]>
+    </select>
+
+    <select id="getIsVisaEligible" resultType="java.lang.String" parameterType="java.lang.Long">
+        <![CDATA[
+            select value from agreements_credit where agreement_id = #{value} and name = 'VISA_QUALIFIED'
+        ]]>
+    </select>
+
+    <select id="getConfigValue" resultType="java.lang.String" parameterType="java.lang.String">
+        <![CDATA[
+            select config_value from config where config_name = #{value}
+            fetch first 1 rows only
+        ]]>
+    </select>
+
+
+    <update id="setVisaProcessComplete" parameterType="java.lang.Long">
+        <![CDATA[
+            update agreements set visa_status = 'PRCSSCMPLT' where agreement_id = #{value}
+        ]]>
+    </update>
+
+    <select id="getAgreement" statementType="PREPARED" resultMap="agreementResultMap">
+        <![CDATA[
+        WITH
+			applicantSource as (
+				SELECT tv.lov_text as value, axref.agreement_id as agreement_id
+				FROM agreements_x_ref axref, lov_codes lvc, text_values tv
+				WHERE axref.agreement_id = #{agreementId}
+                AND lvc.lov_code = axref.value
+                AND tv.text_id = lvc.text_id
+				AND axref.type_code = 'APPLICANT_SOURCE'
+                AND lang_code = 'EN' fetch first 1 rows only),
+
+            asset as (
+                select agreement_id, condition, model_year, model, value, make, cost, serial_num, equipment_code
+                from agreements_equipment
+                where agreement_id = #{agreementId}
+                AND equipment_code in ('MCYC', 'SPBK')
+                FETCH FIRST 1 ROWS ONLY),
+
+            numAsset as (
+                select count(*) as count, agreement_id
+                from agreements_equipment
+                where agreement_id = #{agreementId}
+                AND equipment_code in ('MCYC', 'SPBK')
+                group by agreement_id
+                ),
+
+			master_vendor as (
+				select vendor_code from vendors where is_master != 'N' start with vendor_id = (select vendor_id from agreements where agreement_id = #{agreementId}) connect by prior parent_id = vendor_id fetch first 1 rows only),
+
+			baselineCreditDecision as (
+				select first_time_buyer, max_ltv, credit_tier, pricing_tier, buy_rate, max_term, max_app_amt, required_down_pmt, application_id as agreement_id, baseline_value
+				from credit_decision_history
+				where baseline_value = 'Y'
+				AND application_id = #{agreementId}
+				order by timestamp desc
+				fetch first 1 rows only),
+
+			currentCreditDecision as (
+				select loan_type, first_time_buyer, credit_tier, pricing_tier, buy_rate, max_term, max_app_amt, required_down_pmt, est_monthly_income, max_ltv, application_id as agreement_id, baseline_value
+				from credit_decision_history
+				where application_id = #{agreementId}
+				order by timestamp desc
+				fetch first 1 rows only),
+
+            applicant as (
+				SELECT
+				a.agreement_id,
+                cc.customer_id,
+                cc.first_name,
+                cc.middle_name,
+                cc.last_name,
+                cc.name_suffix,
+                cc.sin,
+                cc.date_of_birth,
+                ci.driver_license_number,
+                cc.home_phone,
+                cc.work_phone,
+                cc.cell_phone,
+                cc.email,
+                cc.residence_payment,
+                e.income,
+                e.income_frequency,
+                e.status,
+                e.employer_name,
+                e.occupation_name,
+                e.ref_years,
+                e.ref_months,
+                e.phone,
+                cc.other_income,
+                cc.other_income_frequency
+
+                FROM agreements a, customers_consumer cc, customers_impl ci, employment e
+                WHERE
+                a.agreement_id = #{agreementId}
+                AND cc.customer_id = a.customer_id
+                AND cc.customer_id = ci.customer_id
+                AND cc.customer_id = e.customer_id
+                ),
+
+            applicantPhysicalAddress as (
+				select
+				a.agreement_id,
+				ca.contact_phone,
+				ca.contact_email,
+				ca.cell_phone,
+                ca.street_num,
+                ca.street_name,
+                ca.street_type,
+                ca.suite_num ,
+                ca.city city,
+                ca.province_code,
+                ca.postal_code,
+                ca.country_code,
+                cat.residence_code,
+                cat.ref_years,
+                cat.ref_months
+                from agreements a, customers_address_types cat, customers_address ca
+                where a.agreement_id = #{agreementId}
+                and cat.customer_id = a.customer_id
+                and cat.address_code = 'RE'
+                and cat.address_id = ca.address_id
+                ),
+
+            applicantMailingAddress as (
+				select
+				a.agreement_id,
+				ca.contact_phone,
+				ca.contact_email,
+				ca.cell_phone,
+                ca.street_num,
+                ca.street_name,
+                ca.street_type,
+                ca.suite_num ,
+                ca.city city,
+                ca.province_code,
+                ca.postal_code,
+                ca.country_code,
+                cat.residence_code,
+                cat.ref_years,
+                cat.ref_months
+                from agreements a, customers_address_types cat, customers_address ca
+                where a.agreement_id = #{agreementId}
+                and cat.customer_id = a.customer_id
+                and cat.address_code = 'SH'
+                and cat.address_id = ca.address_id
+                ),
+
+            applicantEmployerAddress as (
+                select
+                a.agreement_id,
+                ca.address1,
+                ca.city,
+                TRIM(ca.province_code) province_code,
+                ca.postal_code,
+                ca.country_code
+
+                from agreements a, customers_address_types cat, customers_address ca
+                where a.agreement_id = #{agreementId}
+                and cat.customer_id = a.customer_id
+                and cat.address_code = 'E1'
+                and cat.address_id = ca.address_id
+                ),
+
+            applicantDealerEmployee as (
+                SELECT
+                a.agreement_id,
+                cxref.value
+                FROM customers_x_ref cxref, agreements a
+                WHERE a.agreement_id = #{agreementId}
+                AND a.customer_id = cxref.customer_id
+                AND cxref.type_code = 'DEALER_EMPLOYEE'
+                ),
+
+            applicantDealerPrincipal as (
+                SELECT
+                a.agreement_id,
+                cxref.value
+                FROM customers_x_ref cxref, agreements a
+                WHERE a.agreement_id = #{agreementId}
+                AND a.customer_id = cxref.customer_id
+                AND cxref.type_code = 'DEALER_PRINCIPAL'
+                ),
+
+
+            coapplicant as (
+				SELECT
+				a.agreement_id,
+                cc.customer_id,
+                cc.first_name,
+                cc.middle_name,
+                cc.last_name,
+                cc.name_suffix,
+                cc.sin,
+                cc.date_of_birth,
+                ci.driver_license_number,
+                cc.home_phone,
+                cc.work_phone,
+                cc.cell_phone,
+                cc.email,
+                cc.residence_payment,
+                e.income,
+                e.income_frequency,
+                e.status,
+                e.employer_name,
+                e.occupation_name,
+                e.ref_years,
+                e.ref_months,
+                e.phone,
+                cc.other_income,
+                cc.other_income_frequency
+
+                FROM agreements_coapplicants a, customers_consumer cc, customers_impl ci, employment e
+                WHERE
+                a.agreement_id = #{agreementId}
+                AND cc.customer_id = a.customer_id
+                AND cc.customer_id = ci.customer_id
+                AND cc.customer_id = e.customer_id
+                ),
+
+            coapplicantPhysicalAddress as (
+				select
+				a.agreement_id,
+				ca.contact_phone,
+				ca.contact_email,
+				ca.cell_phone,
+                ca.street_num,
+                ca.street_name,
+                ca.street_type,
+                ca.suite_num ,
+                ca.city city,
+                ca.province_code,
+                ca.postal_code,
+                ca.country_code,
+                cat.residence_code,
+                cat.ref_years,
+                cat.ref_months
+                from agreements_coapplicants a, customers_address_types cat, customers_address ca
+                where a.agreement_id = #{agreementId}
+                and cat.customer_id = a.customer_id
+                and cat.address_code = 'RE'
+                and cat.address_id = ca.address_id
+                ),
+
+            coapplicantMailingAddress as (
+				select
+				a.agreement_id,
+				ca.contact_phone,
+				ca.contact_email,
+				ca.cell_phone,
+                ca.street_num,
+                ca.street_name,
+                ca.street_type,
+                ca.suite_num ,
+                ca.city city,
+                ca.province_code,
+                ca.postal_code,
+                ca.country_code,
+                cat.residence_code,
+                cat.ref_years,
+                cat.ref_months
+                from agreements_coapplicants a, customers_address_types cat, customers_address ca
+                where a.agreement_id = #{agreementId}
+                and cat.customer_id = a.customer_id
+                and cat.address_code = 'SH'
+                and cat.address_id = ca.address_id
+                ),
+
+            coapplicantEmployerAddress as (
+                select
+                a.agreement_id,
+                ca.address1,
+                ca.city,
+                TRIM(ca.province_code) province_code,
+                ca.postal_code,
+                ca.country_code
+
+                from agreements_coapplicants a, customers_address_types cat, customers_address ca
+                where a.agreement_id = #{agreementId}
+                and cat.customer_id = a.customer_id
+                and cat.address_code = 'E1'
+                and cat.address_id = ca.address_id
+                ),
+
+            coapplicantDealerEmployee as (
+                SELECT
+                a.agreement_id,
+                cxref.value
+                FROM customers_x_ref cxref, agreements_coapplicants a
+                WHERE a.agreement_id = #{agreementId}
+                AND a.customer_id = cxref.customer_id
+                AND cxref.type_code = 'DEALER_EMPLOYEE'
+                ),
+
+            coapplicantDealerPrincipal as (
+                SELECT
+                a.agreement_id,
+                cxref.value
+                FROM customers_x_ref cxref, agreements_coapplicants a
+                WHERE a.agreement_id = #{agreementId}
+                AND a.customer_id = cxref.customer_id
+                AND cxref.type_code = 'DEALER_PRINCIPAL'
+                )
+
+			SELECT
+				a.agreement_id agreementId,
+				a.status_code appStatus,
+				a.retained_by retainedBy,
+				a.origination_source originationSource,
+				a.created_date createdDate,
+				a.type_code typeCode,
+				applicantSource.value applicationSource,
+				currentCreditDecision.loan_type applicationType,
+				currentCreditDecision.credit_tier "ccd.creditTier",
+				currentCreditDecision.pricing_tier "ccd.pricingTier",
+				currentCreditDecision.max_app_amt "ccd.maxApprovedAmount",
+				currentCreditDecision.max_term "ccd.maxTerm",
+				currentCreditDecision.buy_rate "ccd.wholesaleRate",
+				currentCreditDecision.required_down_pmt "ccd.minDownPaymentPercent",
+				currentCreditDecision.first_time_buyer "ccd.ftb",
+				currentCreditDecision.est_monthly_income monthlyIncome,
+				currentCreditDecision.max_ltv "ccd.maxLTV",
+				currentCreditDecision.baseline_value "ccd.isBaseline",
+				baselineCreditDecision.credit_tier "bcd.creditTier",
+				baselineCreditDecision.pricing_tier "bcd.pricingTier",
+				baselineCreditDecision.max_app_amt "bcd.maxApprovedAmount",
+				baselineCreditDecision.max_term "bcd.maxTerm",
+				baselineCreditDecision.buy_rate "bcd.wholesaleRate",
+				baselineCreditDecision.required_down_pmt "bcd.minDownPaymentPercent",
+				baselineCreditDecision.max_ltv "bcd.maxLTV",
+				baselineCreditDecision.first_time_buyer "bcd.ftb",
+				baselineCreditDecision.baseline_value "bcd.isBaseline",
+				vendors.vendor_code dealerId,
+				vendors.name dealerName,
+				master_vendor.vendor_code busUnit,
+
+				applicant.customer_id "primApp.customerId",
+				applicant.first_name "primApp.firstName",
+				applicant.middle_name "primApp.middleName",
+				applicant.last_name "primApp.lastName",
+				applicant.name_suffix "primApp.suffixName",
+				applicant.sin "primApp.ssn",
+				applicant.date_of_birth "primApp.dob",
+				applicant.driver_license_number "primApp.driversLicense",
+				applicant.other_income "primApp.otherIncome",
+				applicant.other_income_frequency "primApp.otherIncomeFrequency",
+				applicant.residence_payment "applicant.residence_payment",
+
+                applicant.income "primApp.grossIncome",
+				applicant.income_frequency "applicant.income_frequency",
+				applicant.status "primApp.employer.status",
+				applicant.employer_name "primApp.employer.name",
+				applicant.occupation_name "primApp.employer.jobTitle",
+				applicant.ref_years "applicant.ref_years",
+				applicant.ref_months "applicant.ref_months",
+				applicant.phone "primApp.employer.businessPhone",
+
+				applicantEmployerAddress.address1 "applicantEmployerAddress",
+				applicantEmployerAddress.city "primApp.employer.address.city",
+				applicantEmployerAddress.province_code "primApp.employer.address.state",
+				applicantEmployerAddress.postal_code "applicantEmployerZip",
+				applicantEmployerAddress.country_code "applicantEmployerCountry",
+
+                applicantPhysicalAddress.contact_phone "primApp.homePhoneNumber",
+				applicantPhysicalAddress.cell_phone "primApp.cellPhoneNumber",
+				applicantPhysicalAddress.contact_email "primApp.emailAddress",
+
+				applicantPhysicalAddress.street_num "appPhysStNum",
+				applicantPhysicalAddress.street_name "appPhysStName",
+				applicantPhysicalAddress.street_type "appPhysStType",
+				applicantPhysicalAddress.suite_num "appPhysSuiteNum",
+				applicantPhysicalAddress.city "primApp.physicalAddress.city",
+				applicantPhysicalAddress.province_code "primApp.physicalAddress.state",
+				applicantPhysicalAddress.postal_code "appPhysZip",
+				applicantPhysicalAddress.country_code "appPhysCountry",
+
+				applicantPhysicalAddress.residence_code "primApp.residence.type",
+				applicantPhysicalAddress.ref_years "appPhysYears",
+				applicantPhysicalAddress.ref_months "appPhysMonths",
+
+                applicantMailingAddress.street_num "appMailStNum",
+				applicantMailingAddress.street_name "appMailStName",
+				applicantMailingAddress.street_type "appMailStType",
+				applicantMailingAddress.suite_num "appMailSuiteNum",
+				applicantMailingAddress.city "primApp.mailingAddress.city",
+				applicantMailingAddress.province_code "primApp.mailingAddress.state",
+				applicantMailingAddress.postal_code "primApp.mailingAddress.zipCode",
+				applicantMailingAddress.country_code "primApp.mailingAddress.country",
+
+				applicantDealerEmployee.value "primDealerEmployee",
+				applicantDealerPrincipal.value "primDealerPrincipal",
+
+				coapplicant.customer_id "secApp.customerId",
+				coapplicant.first_name "secApp.firstName",
+				coapplicant.middle_name "secApp.middleName",
+				coapplicant.last_name "secApp.lastName",
+				coapplicant.name_suffix "secApp.suffixName",
+				coapplicant.sin "secApp.ssn",
+				coapplicant.date_of_birth "secApp.dob",
+				coapplicant.driver_license_number "secApp.driversLicense",
+				coapplicant.other_income "secApp.otherIncome",
+				coapplicant.other_income_frequency "secApp.otherIncomeFrequency",
+				coapplicant.residence_payment "coappResMonthlyPay",
+
+                coapplicant.income "secApp.grossIncome",
+				coapplicant.income_frequency "secApp.grossIncomeFrequency",
+				coapplicant.status "secApp.employer.status",
+				coapplicant.employer_name "secApp.employer.name",
+				coapplicant.occupation_name "secApp.employer.jobTitle",
+				coapplicant.ref_years "coappRefYears",
+				coapplicant.ref_months "coappRefMonths",
+				coapplicant.phone "secApp.employer.businessPhone",
+
+				coapplicantEmployerAddress.address1 "coappEmployerAddLine1",
+				coapplicantEmployerAddress.city "secApp.employer.address.city",
+				coapplicantEmployerAddress.province_code "coappEmployerSt",
+				coapplicantEmployerAddress.postal_code "coappEmployerZip",
+				coapplicantEmployerAddress.country_code "coappEmployerCountry",
+
+                coapplicantPhysicalAddress.contact_phone "secApp.homePhoneNumber",
+				coapplicantPhysicalAddress.cell_phone "secApp.cellPhoneNumber",
+				coapplicantPhysicalAddress.contact_email "secApp.emailAddress",
+
+				coapplicantPhysicalAddress.street_num "coappPhysStNum",
+				coapplicantPhysicalAddress.street_name "coappPhysStName",
+				coapplicantPhysicalAddress.street_type "coappPhysStType",
+				coapplicantPhysicalAddress.suite_num "coappPhysSuiteNum",
+				coapplicantPhysicalAddress.city "secApp.physicalAddress.city",
+				coapplicantPhysicalAddress.province_code "secApp.physicalAddress.state",
+				coapplicantPhysicalAddress.postal_code "coappPhysZip",
+				coapplicantPhysicalAddress.country_code "coappPhysCountry",
+
+				coapplicantPhysicalAddress.residence_code "secApp.residence.type",
+				coapplicantPhysicalAddress.ref_years "coappPhysYears",
+				coapplicantPhysicalAddress.ref_months "coappPhysMonths",
+
+                coapplicantMailingAddress.street_num "coappMailStNum",
+				coapplicantMailingAddress.street_name "coappMailStName",
+				coapplicantMailingAddress.street_type "coappMailStType",
+				coapplicantMailingAddress.suite_num "coappMailSuiteNum",
+				coapplicantMailingAddress.city "secApp.mailingAddress.city",
+				coapplicantMailingAddress.province_code "secApp.mailingAddress.state",
+				coapplicantMailingAddress.postal_code "secApp.mailingAddress.zipCode",
+				coapplicantMailingAddress.country_code "secApp.mailingAddress.country",
+
+				coapplicantDealerEmployee.value "secDealerEmployee",
+				coapplicantDealerPrincipal.value "secDealerPrincipal",
+
+				asset.condition "assetInfo.newUsedInd",
+				asset.model "assetInfo.model",
+				asset.model_year "assetInfo.modelYear",
+				asset.value "assetInfo.value",
+				asset.make "assetInfo.make",
+				asset.cost "assetInfo.sellingPrice",
+				asset.serial_num "assetInfo.vin",
+				asset.equipment_code "assetInfo.type",
+
+				numAsset.count "numMotorcycles"
+
+                FROM agreements a
+				left outer join baselineCreditDecision on baselineCreditDecision.agreement_id = a.agreement_id
+				left outer join currentCreditDecision on currentCreditDecision.agreement_id = a.agreement_id
+				left outer join applicant on applicant.agreement_id = a.agreement_id
+				left outer join applicantSource on applicantSource.agreement_id = a.agreement_id
+				left outer join applicantPhysicalAddress on applicantPhysicalAddress.agreement_id = a.agreement_id
+				left outer join applicantMailingAddress on applicantMailingAddress.agreement_id = a.agreement_id
+				left outer join applicantEmployerAddress on applicantEmployerAddress.agreement_id = a.agreement_id
+				left outer join applicantDealerEmployee on applicantDealerEmployee.agreement_id = a.agreement_id
+				left outer join applicantDealerPrincipal on applicantDealerPrincipal.agreement_id = a.agreement_id
+				left outer join coapplicant on coapplicant.agreement_id = a.agreement_id
+				left outer join coapplicantPhysicalAddress on coapplicantPhysicalAddress.agreement_id = a.agreement_id
+				left outer join coapplicantMailingAddress on coapplicantMailingAddress.agreement_id = a.agreement_id
+				left outer join coapplicantEmployerAddress on coapplicantEmployerAddress.agreement_id = a.agreement_id
+				left outer join coapplicantDealerEmployee on coapplicantDealerEmployee.agreement_id = a.agreement_id
+				left outer join coapplicantDealerPrincipal on coapplicantDealerPrincipal.agreement_id = a.agreement_id
+				left outer join asset on asset.agreement_id = a.agreement_id
+				left outer join numAsset on numAsset.agreement_id = a.agreement_id,
+
+                vendors,
+				master_vendor
+
+
+                WHERE a.agreement_id = #{agreementId}
+                AND vendors.vendor_id = a.vendor_id
+
+        ]]>
+    </select>
+
+    <!--using results map for certain properties because the db doesn't have the compatibility flag turned off.
+    This means the identifier length is restricted to 30 characters-->
+
+    <resultMap id="agreementResultMap" type="com.hdfs.visa.api.model.builder.AgreementBuilder">
+        <id column="agreementId" property="agreementId"/>
+
+        <result column="applicant.residence_payment" property="primApp.residence.monthlyPayment"/>
+        <result column="applicant.income_frequency" property="primApp.grossIncomeFrequency"/>
+        <result column="applicant.ref_years" property="primApp.employer.duration.years"/>
+        <result column="applicant.ref_months" property="primApp.employer.duration.months"/>
+
+        <result column="applicantEmployerAddress" property="primApp.employer.address.address"/>
+        <result column="applicantEmployerZip" property="primApp.employer.address.zipCode"/>
+        <result column="applicantEmployerCountry" property="primApp.employer.address.country"/>
+
+        <result column="appPhysStNum" property="primApp.physicalAddress.streetNumber"/>
+        <result column="appPhysStName" property="primApp.physicalAddress.streetName"/>
+        <result column="appPhysStType" property="primApp.physicalAddress.streetType"/>
+        <result column="appPhysSuiteNum" property="primApp.physicalAddress.suiteNumber"/>
+        <result column="appPhysZip" property="primApp.physicalAddress.zipCode"/>
+        <result column="appPhysCountry" property="primApp.physicalAddress.country"/>
+        <result column="appPhysYears" property="primApp.residence.timeAtResidence.years"/>
+        <result column="appPhysMonths" property="primApp.residence.timeAtResidence.months"/>
+
+        <result column="appMailStNum" property="primApp.mailingAddress.streetNumber"/>
+        <result column="appMailStName" property="primApp.mailingAddress.streetName"/>
+        <result column="appMailStType" property="primApp.mailingAddress.streetType"/>
+        <result column="appMailSuiteNum" property="primApp.mailingAddress.suiteNumber"/>
+
+        <result column="coappResMonthlyPay" property="secApp.residence.monthlyPayment"/>
+        <result column="coappRefYears" property="secApp.employer.duration.years"/>
+        <result column="coappRefMonths" property="secApp.employer.duration.months"/>
+        <result column="coappEmployerAddLine1" property="secApp.employer.address.address"/>
+        <result column="coappEmployerSt" property="secApp.employer.address.state"/>
+        <result column="coappEmployerZip" property="secApp.employer.address.zipCode"/>
+        <result column="coappEmployerCountry" property="secApp.employer.address.country"/>
+
+        <result column="coappPhysStNum" property="secApp.physicalAddress.streetNumber"/>
+        <result column="coappPhysStName" property="secApp.physicalAddress.streetName"/>
+        <result column="coappPhysStType" property="secApp.physicalAddress.streetType"/>
+        <result column="coappPhysSuiteNum" property="secApp.physicalAddress.suiteNumber"/>
+
+        <result column="coappPhysZip" property="secApp.physicalAddress.zipCode"/>
+        <result column="coappPhysCountry" property="secApp.physicalAddress.country"/>
+        <result column="coappPhysYears" property="secApp.residence.timeAtResidence.years"/>
+        <result column="coappPhysMonths" property="secApp.residence.timeAtResidence.months"/>
+
+        <result column="coappMailStNum" property="secApp.mailingAddress.streetNumber"/>
+        <result column="coappMailStName" property="secApp.mailingAddress.streetName"/>
+        <result column="coappMailStType" property="secApp.mailingAddress.streetType"/>
+        <result column="coappMailSuiteNum" property="secApp.mailingAddress.suiteNumber"/>
+
+
+
+    </resultMap>
+
+</mapper>

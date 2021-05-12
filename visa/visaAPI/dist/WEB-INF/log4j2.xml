@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Configuration xmlns="http://logging.apache.org/log4j/2.0/config" monitorInterval="5">
+    <Properties>
+        <Property name="basePath">logs/visaAPI</Property>
+    </Properties>
+    <Appenders>
+        <!-- File Appender -->
+        <RollingFile
+                name="rollingRequestFile"
+                fileName="${basePath}/requests.log"
+                filePattern="${LOG_DIR}/requests.%d{dd-MMM}.log.gz"
+                ignoreExceptions="false">
+            <PatternLayout>
+                <Pattern>%d{yyyy-MM-dd HH:mm:ss} %-5p %m%n</Pattern>
+            </PatternLayout>
+            <Policies>
+                <OnStartupTriggeringPolicy />
+                <SizeBasedTriggeringPolicy size="500 MB" />
+                <TimeBasedTriggeringPolicy />
+            </Policies>
+            <DefaultRolloverStrategy max="20" />
+        </RollingFile>
+
+        <RollingFile
+                name="rollingFile"
+                fileName="${basePath}/visaAPI.log"
+                filePattern="${LOG_DIR}/application.%d{dd-MMM}.log.gz"
+                ignoreExceptions="false">
+            <PatternLayout>
+                <Pattern>%d{yyyy-MM-dd HH:mm:ss} | %C{2} (%F:%L) | %-5p %m%n</Pattern>
+            </PatternLayout>
+            <Policies>
+                <OnStartupTriggeringPolicy />
+                <SizeBasedTriggeringPolicy size="500 MB" />
+                <TimeBasedTriggeringPolicy />
+            </Policies>
+            <DefaultRolloverStrategy max="20" />
+        </RollingFile>
+        <!-- Console Appender -->
+        <!--<Console name="STDOUT" target="SYSTEM_OUT">-->
+        <!--<PatternLayout pattern="%-5p | %d{yyyy-MM-dd HH:mm:ss} | [%t] %C{2} (%F:%L) - %m%n" />-->
+        <!--</Console>-->
+    </Appenders>
+    <Loggers>
+
+        <Logger name="org.springframework.web.filter.CommonsRequestLoggingFilter" level="debug" additivity="false">
+            <AppenderRef ref="rollingRequestFile"/>
+        </Logger>
+
+        <Root level="INFO">
+            <AppenderRef ref="rollingFile" />
+        </Root>
+
+
+    </Loggers>
+</Configuration>
